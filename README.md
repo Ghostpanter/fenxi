@@ -11,7 +11,7 @@
 分席（8080）  每个连接只订阅自己的标签
     │
     ▼
-容器里的 Google Chrome（登录一次，记在 volume 里）
+容器里的 Google Chrome（登录一次，记在外接硬盘上）
     ├── 标签甲
     ├── 标签乙
     └── 登录用的那一页（/desktop，地址可改）
@@ -58,7 +58,7 @@ docker compose ps
 
 ## 第一次登录
 
-只需要做一次。登录态写在名为 `profile` 的 volume 里，重启容器还在。删掉这个 volume 才要重新登录。
+只需要做一次。登录态写在外接硬盘的 `profile` 目录里，不在容器里面。重建、删除容器都还在。拔掉或删掉这个目录才要重新登录。
 
 在你自己的电脑上打开分席的地址，后面加上 `/desktop`：
 
@@ -91,12 +91,38 @@ http://服务器:8080/desktop
 
 ## 数据放在哪
 
-| 卷 | 里面是什么 |
-| --- | --- |
-| `profile` | 浏览器登录态。等于账号的钥匙 |
-| `state` | 每个人的称呼、口令和这一页上的对话副本 |
+登录态不放在容器里，也不放在 Docker 自己的卷里。`.env` 里的 `DATA_DIR` 指到外接硬盘的挂载点，例如 `/mnt/fenxi`。启动后这块盘上会有：
 
-不要把这两个卷提交进 git，也不要拷给不信任的人。`state` 里有对话内容。
+| 目录 | 里面是什么 |
+| --- | --- |
+| `$DATA_DIR/profile` | 浏览器登录态。等于账号的钥匙 |
+| `$DATA_DIR/state` | 每个人的称呼、口令和这一页上的对话副本 |
+
+硬盘请格式化成 ext4 再挂上。exFAT 和 NTFS 不能改文件所有者，Chrome 会起不来。
+
+```bash
+lsblk
+sudo mkdir -p /mnt/fenxi
+sudo mount /dev/sdb1 /mnt/fenxi
+```
+
+想开机自动挂上，把对应一行写进 `/etc/fstab`。然后在 `.env` 里写 `DATA_DIR=/mnt/fenxi`。
+
+已经用旧版 Docker 卷登录过的，先把钥匙拷出来，免得再登一次：
+
+```bash
+mkdir -p /mnt/fenxi/profile /mnt/fenxi/state
+docker run --rm \
+  -v fenxi_profile:/from \
+  -v /mnt/fenxi/profile:/to \
+  alpine cp -a /from/. /to/
+docker run --rm \
+  -v fenxi_state:/from \
+  -v /mnt/fenxi/state:/to \
+  alpine cp -a /from/. /to/
+```
+
+不要把这两个目录提交进 git，也不要拷给不信任的人。`state` 里有对话内容。
 
 换口令：改 `.env` 里的 `ACCESS_CODE`，然后 `docker compose up -d`。已经进来的人仍然能用，直到他们离开或你清掉席位。
 
@@ -115,7 +141,7 @@ git pull
 docker compose up -d --build
 ```
 
-登录态和对话副本都在卷里，更新不会清掉。
+登录态和对话副本都在 `DATA_DIR` 那块盘上，更新不会清掉。
 
 ## 常见问题
 
@@ -138,7 +164,7 @@ docker compose logs -f fenxi
 内存不够时给 Docker 多留一点，compose 里已经把 `/dev/shm` 设成 1 GB。
 
 **重启之后又要登录。**  
-`profile` 卷没有挂上，或被删了。`docker compose down` 不会删卷。`docker compose down -v` 会删，登录态就没了。
+外接硬盘没有挂上，或 `DATA_DIR` 指错了目录。`docker compose down` 不会删这块盘上的文件。
 
 **VNC 密码怎么对都不对。**  
 只认前 8 位。远程打开时用的是 `/desktop` 里填的那台服务器，不是你自己电脑的 localhost。

@@ -18,15 +18,11 @@ services:
       PROFILE_DIR: /data/profile
       STATE_DIR: /data/state
     volumes:
-      - profile:/data/profile
-      - state:/data/state
+      - ${DATA_DIR:-./data}/profile:/data/profile
+      - ${DATA_DIR:-./data}/state:/data/state
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 40s
-
-volumes:
-  profile:
-  state:
