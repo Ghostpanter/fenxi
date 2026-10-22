@@ -8,10 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PROFILE_DIR=/data/profile \
     STATE_DIR=/data/state \
     TZ=Asia/Shanghai \
-    CHROME_PATH=/usr/bin/google-chrome-stable \
-    CHROME_UID=1000 \
-    CHROME_GID=1000 \
-    CHROME_HOME=/home/chrome
+    CHROME_PATH=/usr/bin/google-chrome-stable
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -24,8 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       wget \
     && wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get install -y /tmp/chrome.deb \
-    && rm -rf /tmp/chrome.deb /var/lib/apt/lists/* \
-    && useradd --create-home --shell /bin/false --uid 1000 chrome
+    && rm -rf /tmp/chrome.deb /var/lib/apt/lists/*
+
+RUN if ! id chrome >/dev/null 2>&1; then useradd --create-home --shell /bin/false chrome; fi \
+    && printf 'CHROME_UID=%s\nCHROME_GID=%s\nCHROME_HOME=%s\n' \
+         "$(id -u chrome)" "$(id -g chrome)" "$(getent passwd chrome | cut -d: -f6)" \
+         > /etc/fenxi-chrome.env
 
 WORKDIR /app
 

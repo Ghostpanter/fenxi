@@ -1,6 +1,11 @@
 #!/bin/bash
 set -eu
 export DISPLAY="${DISPLAY:-:99}"
+if [ -f /etc/fenxi-chrome.env ]; then
+  set -a
+  . /etc/fenxi-chrome.env
+  set +a
+fi
 mkdir -p /tmp/.X11-unix /data/profile /data/state
 chmod 1777 /tmp/.X11-unix || true
 rm -f /tmp/.X99-lock
