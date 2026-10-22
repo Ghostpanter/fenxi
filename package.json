@@ -1,0 +1,18 @@
+{
+  "name": "fenxi",
+  "version": "1.0.0",
+  "private": true,
+  "description": "一份 Grok 网页分给朋友：容器里登录一次，每人一个标签页，不用 API key。",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "playwright": "1.64.0",
+    "ws": "8.18.3"
+  }
+}

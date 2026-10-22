@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>分席</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <section class="gate" id="gate">
+    <form class="card" id="gateForm">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16 6.2v19.6" stroke="currentColor" stroke-width="1.6"/></svg>
+      </div>
+      <h1>分席</h1>
+      <p class="lede">一份网页，每人自己的一页。你写下的话只送进你的标签，别人看不到。</p>
+      <label for="name">你的称呼</label>
+      <input id="name" name="username" autocomplete="username" maxlength="24" required placeholder="怎么称呼你" />
+      <label for="code">入场口令</label>
+      <input id="code" name="password" type="password" autocomplete="current-password" required />
+      <p class="form-error" id="gateError" role="alert"></p>
+      <button type="submit" id="enter">进入我的页面</button>
+      <!--DEMO-->
+      <p class="quiet" id="gateHealth">正在看容器里的网页…</p>
+    </form>
+  </section>
+
+  <main class="sheet" id="sheet" hidden>
+    <header class="top">
+      <div class="brand">
+        <span class="mark small" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16 6.2v19.6" stroke="currentColor" stroke-width="1.6"/></svg>
+        </span>
+        <div>
+          <strong>分席</strong>
+          <span class="who" id="who"></span>
+        </div>
+      </div>
+      <p class="pill" id="pill"><span class="dot" id="dot"></span><span id="pillText">正在连接</span></p>
+      <div class="actions">
+        <button type="button" class="text" id="fresh">新的一页</button>
+        <button type="button" class="text" id="leave">离开</button>
+      </div>
+    </header>
+    <p class="notice" id="notice" role="status"></p>
+    <ol class="thread" id="thread"></ol>
+    <form class="composer" id="composer">
+      <label class="sr" for="box">写给这一页</label>
+      <textarea id="box" rows="1" maxlength="8000" placeholder="写在这里，只会进你自己的那一页"></textarea>
+      <button type="submit" id="send">发送</button>
+    </form>
+  </main>
+  <script src="/format.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
