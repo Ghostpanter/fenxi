@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const { renderMessage, safeImageUrl } = require('../public/format');
 const { codesMatch, cleanName } = require('../server/auth');
+const { hasLoginCookie } = require('../server/session-cookie');
 const { conversationUrlOf, novncUpstreamPath } = require('../server/urls');
 const { Hub } = require('../server/hub');
 const { Store } = require('../server/store');
@@ -42,6 +43,14 @@ test('names stay short and drop control characters', () => {
   assert.equal(cleanName(''), null);
   assert.equal(cleanName('名'.repeat(25)), null);
   assert.equal(cleanName('名'.repeat(24)), '名'.repeat(24));
+});
+
+test('login is the sso cookie, not the cloudflare clearance cookie', () => {
+  assert.equal(hasLoginCookie([{ name: 'cf_clearance', value: 'x', domain: '.grok.com' }]), false);
+  assert.equal(hasLoginCookie([{ name: 'sso', value: '', domain: '.grok.com' }]), false);
+  assert.equal(hasLoginCookie([{ name: 'sso', value: 'session-token', domain: '.grok.com' }]), true);
+  assert.equal(hasLoginCookie([{ name: 'sso', value: 'session-token', domain: '.x.ai' }]), true);
+  assert.equal(hasLoginCookie([{ name: 'sso', value: 'session-token', domain: '.evil.com' }]), false);
 });
 
 test('desktop login can target another host through the same app', () => {

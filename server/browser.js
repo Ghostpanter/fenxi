@@ -2,8 +2,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const { chromium } = require('playwright');
 const { conversationUrlOf } = require('./urls');
+const { hasLoginCookie } = require('./session-cookie');
+const { readLoginCookies, loginPageSettled } = require('./cdp-cookies');
 
 // grok.com 会改版。输入框、发送、停止、回复都做了多套选择器。
 // 改版后优先改这里，不要改外面的协议。
@@ -31,6 +34,31 @@ const STOP_BUTTON = [
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForDebug(port) {
+  const deadline = Date.now() + 20000;
+  const probe = () => new Promise((resolve, reject) => {
+    const req = require('http').get(`http://127.0.0.1:${port}/json/version`, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on('error', reject);
+    req.setTimeout(1000, () => req.destroy(new Error('timeout')));
+  });
+  return (async () => {
+    let last = '浏览器没有起来';
+    while (Date.now() < deadline) {
+      try {
+        const status = await probe();
+        if (status && status < 500) return;
+      } catch (err) {
+        last = err.message || last;
+      }
+      await sleep(250);
+    }
+    throw new Error(last);
+  })();
 }
 
 function grokHome() {
@@ -66,6 +94,11 @@ class Pool {
     this.tabs = new Set();
     this.timer = null;
     this.launching = false;
+    this.chromeProc = null;
+    this.browser = null;
+    this.debugPort = Number(process.env.CHROME_PORT || 9222);
+    this.closing = false;
+    this.crashes = [];
   }
 
   setState(next) {
@@ -75,7 +108,7 @@ class Pool {
   }
 
   async start() {
-    if (this.context || this.launching) return;
+    if (this.context || this.launching || this.chromeProc) return;
     this.launching = true;
     this.setState('starting');
     try {
@@ -84,60 +117,134 @@ class Pool {
         fs.rmSync(path.join(this.profileDir, name), { force: true });
       }
       const wantHeadless = process.env.HEADLESS === '1' || process.env.HEADLESS === 'true';
-      try {
-        await this.launch(wantHeadless);
-      } catch (err) {
-        if (wantHeadless) throw err;
-        console.error('headed browser failed, retry headless:', err.message);
-        await this.launch(true);
-      }
-      const pages = this.context.pages();
-      for (let i = 1; i < pages.length; i += 1) {
-        await pages[i].close().catch(() => {});
-      }
-      this.watch = pages[0] || await this.context.newPage();
-      await this.watch.goto(grokHome(), { waitUntil: 'domcontentloaded', timeout: 45000 }).catch((err) => {
-        this.lastError = err.message || String(err);
-        console.error('open grok:', this.lastError);
-      });
+      await this.spawnChrome(wantHeadless);
       this.setState('ready');
-      await this.refreshLogin();
+      this.noteCloudflare().catch(() => {});
       this.timer = setInterval(() => {
-        this.refreshLogin().catch((err) => console.error('login check:', err.message));
-      }, 8000);
+        this.tick().catch((err) => console.error('browser tick:', err.message));
+      }, 4000);
       this.timer.unref?.();
+      await this.tick();
     } catch (err) {
       this.lastError = err.message || String(err);
       this.setState('down');
       console.error('browser launch failed:', this.lastError);
-      if (this.context) {
-        await this.context.close().catch(() => {});
-        this.context = null;
-      }
+      this.stopChrome();
     } finally {
       this.launching = false;
     }
   }
 
-  async launch(headless) {
-    this.context = await chromium.launchPersistentContext(this.profileDir, {
-      headless,
-      viewport: { width: 1440, height: 900 },
-      locale: 'zh-CN',
-      timezoneId: process.env.TZ || 'Asia/Shanghai',
-      acceptDownloads: false,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-infobars',
-        '--window-size=1440,900',
-        '--lang=zh-CN',
-        '--no-first-run',
-        '--no-default-browser-check',
-      ],
-      ignoreDefaultArgs: ['--enable-automation'],
+  async spawnChrome(headless) {
+    const bin = chromium.executablePath();
+    const args = [
+      `--user-data-dir=${this.profileDir}`,
+      `--remote-debugging-port=${this.debugPort}`,
+      '--remote-debugging-address=127.0.0.1',
+      '--remote-allow-origins=*',
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-search-engine-choice-screen',
+      '--password-store=basic',
+      '--window-size=1440,900',
+      '--window-position=0,0',
+      '--lang=zh-CN',
+      '--enable-webgl',
+      '--ignore-gpu-blocklist',
+      '--enable-unsafe-swiftshader',
+      '--use-gl=angle',
+      '--use-angle=swiftshader',
+    ];
+    if (headless) {
+      args.push('--headless=new');
+      console.error('headless: Cloudflare 验证多半会失败。登录请用桌面里的窗口。');
+    }
+    args.push(grokHome());
+    const proc = spawn(bin, args, {
+      detached: true,
+      env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
+      stdio: ['ignore', 'ignore', 'pipe'],
     });
+    this.chromeProc = proc;
+    proc.stderr.on('data', (buf) => {
+      const line = buf.toString().replace(/\s+/g, ' ').trim();
+      if (line && /error|fatal|failed/i.test(line)) console.error('chrome:', line.slice(0, 240));
+    });
+    proc.on('exit', (code) => {
+      if (this.chromeProc === proc) this.chromeProc = null;
+      this.context = null;
+      this.browser = null;
+      this.watch = null;
+      if (this.closing) return;
+      console.error('chrome exited', code);
+      this.crashes = this.crashes.filter((at) => Date.now() - at < 60_000);
+      this.crashes.push(Date.now());
+      if (this.crashes.length > 5) {
+        this.setState('down');
+        console.error('chrome keeps exiting, stopped retrying');
+        return;
+      }
+      setTimeout(() => {
+        this.start().catch((err) => console.error('relaunch:', err.message));
+      }, 3000);
+    });
+    await waitForDebug(this.debugPort);
+  }
+
+  stopChrome() {
+    const proc = this.chromeProc;
+    this.chromeProc = null;
+    if (!proc || !proc.pid) return;
+    try { process.kill(-proc.pid, 'SIGTERM'); }
+    catch { proc.kill('SIGTERM'); }
+  }
+
+  async noteCloudflare() {
+    try {
+      const res = await fetch('https://challenges.cloudflare.com/', { signal: AbortSignal.timeout(5000) });
+      if (res.status >= 500) throw new Error(`status ${res.status}`);
+    } catch (err) {
+      console.error('到不了 Cloudflare 验证服务器，登录页会显示验证失败:', err.message);
+    }
+  }
+
+  async tick() {
+    if (!this.chromeProc) return;
+    if (!this.context) {
+      let likely = false;
+      try { likely = await loginPageSettled(this.debugPort); }
+      catch { return; }
+      if (!likely) return;
+      let cookies = [];
+      try { cookies = await readLoginCookies(this.debugPort); }
+      catch (err) {
+        console.error('cookie probe:', err.message);
+        return;
+      }
+      if (!hasLoginCookie(cookies)) return;
+      console.log('login cookie seen, attaching');
+      await this.attach();
+    }
+    await this.refreshLogin();
+  }
+
+  async attach() {
+    this.browser = await chromium.connectOverCDP(`http://127.0.0.1:${this.debugPort}`);
+    this.browser.on('disconnected', () => {
+      this.context = null;
+      this.browser = null;
+      this.watch = null;
+      if (this.loggedIn) {
+        this.loggedIn = false;
+        this.onLogin(false);
+      }
+    });
+    this.context = this.browser.contexts()[0];
+    if (!this.context) throw new Error('没有浏览器窗口');
+    const pages = this.context.pages();
+    this.watch = pages.find((page) => /grok\.com|accounts\.x\.ai/.test(page.url())) || pages[0] || null;
   }
 
   async refreshLogin() {
@@ -159,7 +266,7 @@ class Pool {
   }
 
   async openTab(conversationUrl) {
-    if (!this.context) throw new Error('浏览器还没准备好');
+    if (!this.context) throw new Error('网页还没登录。请先在容器桌面里完成验证和登录，通过后这一页会自己接上。');
     const page = await this.context.newPage();
     const tab = new Tab(page);
     this.tabs.add(tab);
@@ -268,11 +375,14 @@ class Pool {
   }
 
   async shutdown() {
+    this.closing = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    if (this.context) await this.context.close().catch(() => {});
+    if (this.browser) await this.browser.close().catch(() => {});
+    this.browser = null;
     this.context = null;
     this.watch = null;
+    this.stopChrome();
   }
 }
 
