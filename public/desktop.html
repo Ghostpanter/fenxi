@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>登录桌面 · 分席</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <section class="gate">
+    <form class="card" id="desk">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16 6.2v19.6" stroke="currentColor" stroke-width="1.6"/></svg>
+      </div>
+      <h1>登录</h1>
+      <p class="lede">服务器在远处也一样。地址跟着你打开这一页的主机走，也可以改成别的 IP 或域名。</p>
+      <label for="host">服务器地址</label>
+      <input id="host" name="host" autocomplete="off" required placeholder="公网 IP 或域名" />
+      <div class="split">
+        <div>
+          <label for="port">端口</label>
+          <input id="port" name="port" inputmode="numeric" required />
+        </div>
+        <div>
+          <label for="where">连到哪</label>
+          <select id="where">
+            <option value="same">跟分席同一个地址</option>
+            <option value="direct">桌面端口 6080</option>
+          </select>
+        </div>
+      </div>
+      <p class="form-error" id="deskError" role="alert"></p>
+      <button type="submit">打开容器里的浏览器</button>
+      <p class="quiet">这一页能看到所有人的标签，只给自己。密码是桌面密码的前 8 位。朋友继续用进门那一页，不要把这里发给他们。</p>
+      <p class="quiet"><a href="/">回进门页</a></p>
+    </form>
+  </section>
+  <script src="/desktop.js"></script>
+</body>
+</html>

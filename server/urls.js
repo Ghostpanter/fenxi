@@ -12,4 +12,11 @@ function conversationUrlOf(url) {
   }
 }
 
-module.exports = { conversationUrlOf };
+function novncUpstreamPath(pathname, search) {
+  if (pathname !== '/novnc' && !pathname.startsWith('/novnc/')) return null;
+  let rest = pathname.slice('/novnc'.length);
+  if (!rest || rest === '/') rest = '/vnc.html';
+  return rest + (search || '');
+}
+
+module.exports = { conversationUrlOf, novncUpstreamPath };

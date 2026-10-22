@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { renderMessage, safeImageUrl } = require('../public/format');
 const { codesMatch, cleanName } = require('../server/auth');
-const { conversationUrlOf } = require('../server/urls');
+const { conversationUrlOf, novncUpstreamPath } = require('../server/urls');
 const { Hub } = require('../server/hub');
 const { Store } = require('../server/store');
 
@@ -42,6 +42,14 @@ test('names stay short and drop control characters', () => {
   assert.equal(cleanName(''), null);
   assert.equal(cleanName('名'.repeat(25)), null);
   assert.equal(cleanName('名'.repeat(24)), '名'.repeat(24));
+});
+
+test('desktop login can target another host through the same app', () => {
+  assert.equal(novncUpstreamPath('/novnc', ''), '/vnc.html');
+  assert.equal(novncUpstreamPath('/novnc/', '?autoconnect=1'), '/vnc.html?autoconnect=1');
+  assert.equal(novncUpstreamPath('/novnc/app/ui.js', ''), '/app/ui.js');
+  assert.equal(novncUpstreamPath('/desktop', ''), null);
+  assert.equal(novncUpstreamPath('/ws', ''), null);
 });
 
 test('conversation urls drop query and foreign hosts', () => {

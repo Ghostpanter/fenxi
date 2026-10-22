@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('http');
+const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -9,7 +10,7 @@ const { Store } = require('./store');
 const { Hub } = require('./hub');
 const { Pool } = require('./browser');
 const { codesMatch, cleanName, clientIp } = require('./auth');
-const { conversationUrlOf } = require('./urls');
+const { conversationUrlOf, novncUpstreamPath } = require('./urls');
 const { escapeHtml } = require('../public/format');
 
 const HOST = process.env.HOST || '0.0.0.0';
@@ -22,6 +23,7 @@ const PROFILE_DIR = process.env.PROFILE_DIR || path.join(__dirname, '..', 'data'
 const STATE_DIR = process.env.STATE_DIR || path.join(__dirname, '..', 'data', 'state');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const DEMO = process.env.DEMO_HINT === '1';
+const NOVNC_PORT = Number(process.env.NOVNC_PORT || 6080);
 
 if (ACCESS_CODE.length < 4) {
   console.error('ACCESS_CODE 至少 4 位。先复制 .env.example 为 .env。');
@@ -295,6 +297,23 @@ async function handleLeave(session) {
 
 async function handleRequest(req, res) {
   const url = new URL(req.url, 'http://fenxi.local');
+  if (req.method === 'GET' && (url.pathname === '/desktop' || url.pathname === '/desktop/')) {
+    const file = path.join(PUBLIC_DIR, 'desktop.html');
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer',
+    });
+    if (req.method === 'HEAD') return res.end();
+    fs.createReadStream(file).pipe(res);
+    return;
+  }
+  const upstream = novncUpstreamPath(url.pathname, url.search);
+  if (upstream && (req.method === 'GET' || req.method === 'HEAD')) {
+    proxyNovnc(req, res, upstream);
+    return;
+  }
   if (req.method === 'GET' && url.pathname === '/api/health') {
     sendJson(res, 200, {
       ok: true,
@@ -372,6 +391,51 @@ async function handleRequest(req, res) {
   });
 }
 
+function proxyNovnc(req, res, upstreamPath) {
+  const preq = http.request({
+    hostname: '127.0.0.1',
+    port: NOVNC_PORT,
+    path: upstreamPath,
+    method: req.method,
+    headers: { ...req.headers, host: `127.0.0.1:${NOVNC_PORT}` },
+  }, (pres) => {
+    res.writeHead(pres.statusCode || 502, pres.headers);
+    if (req.method === 'HEAD') {
+      res.end();
+      pres.resume();
+      return;
+    }
+    pres.pipe(res);
+  });
+  preq.on('error', () => {
+    if (res.headersSent) return;
+    res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end('容器桌面还没开。远程机器上先启动服务，并设置 NOVNC_PASSWORD。');
+  });
+  req.pipe(preq);
+}
+
+function proxyDesktopSocket(req, socket, head) {
+  const upstream = net.connect(NOVNC_PORT, '127.0.0.1', () => {
+    const lines = [`${req.method} ${req.url} HTTP/1.1`];
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      if (/^host$/i.test(req.rawHeaders[i])) continue;
+      lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+    }
+    lines.push(`Host: 127.0.0.1:${NOVNC_PORT}`);
+    upstream.write(`${lines.join('\r\n')}\r\n\r\n`);
+    if (head && head.length) upstream.write(head);
+    upstream.pipe(socket);
+    socket.pipe(upstream);
+  });
+  const drop = () => {
+    socket.destroy();
+    upstream.destroy();
+  };
+  upstream.on('error', drop);
+  socket.on('error', drop);
+}
+
 const server = http.createServer((req, res) => {
   handleRequest(req, res).catch((err) => {
     console.error('request', err.message);
@@ -379,7 +443,24 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64_000 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 64_000 });
+
+server.on('upgrade', (req, socket, head) => {
+  let pathname = req.url || '/';
+  const q = pathname.indexOf('?');
+  if (q !== -1) pathname = pathname.slice(0, q);
+  if (pathname === '/ws') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+    return;
+  }
+  if (pathname === '/websockify' || pathname.startsWith('/websockify/')) {
+    proxyDesktopSocket(req, socket, head);
+    return;
+  }
+  socket.destroy();
+});
 
 wss.on('connection', (socket, req) => {
   let session = null;
