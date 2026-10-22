@@ -98,8 +98,10 @@
 
   function applyLogin(next) {
     loggedIn = !!next;
-    if (loggedIn) setPill('网页已登录', true);
-    else setPill('网页还没登录', false);
+    if (loggedIn) {
+      setPill('网页已登录', true);
+      setNotice('');
+    } else setPill('网页还没登录', false);
     sendBtn.disabled = false;
   }
 

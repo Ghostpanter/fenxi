@@ -7,7 +7,8 @@ const os = require('os');
 const path = require('path');
 const { renderMessage, safeImageUrl } = require('../public/format');
 const { codesMatch, cleanName } = require('../server/auth');
-const { hasLoginCookie } = require('../server/session-cookie');
+const { hasLoginCookie, grokCookieNames } = require('../server/session-cookie');
+const { usableGrokUrl } = require('../server/cdp-cookies');
 const { conversationUrlOf, novncUpstreamPath } = require('../server/urls');
 const { Hub } = require('../server/hub');
 const { Store } = require('../server/store');
@@ -49,8 +50,18 @@ test('login is the sso cookie, not the cloudflare clearance cookie', () => {
   assert.equal(hasLoginCookie([{ name: 'cf_clearance', value: 'x', domain: '.grok.com' }]), false);
   assert.equal(hasLoginCookie([{ name: 'sso', value: '', domain: '.grok.com' }]), false);
   assert.equal(hasLoginCookie([{ name: 'sso', value: 'session-token', domain: '.grok.com' }]), true);
+  assert.equal(hasLoginCookie([{ name: 'SSO', value: 'session-token', domain: 'auth.grokusercontent.com' }]), true);
   assert.equal(hasLoginCookie([{ name: 'sso', value: 'session-token', domain: '.x.ai' }]), true);
   assert.equal(hasLoginCookie([{ name: 'sso', value: 'session-token', domain: '.evil.com' }]), false);
+  assert.deepEqual(grokCookieNames([
+    { name: 'sso', domain: '.grok.com' },
+    { name: 'cf_clearance', domain: '.grok.com' },
+    { name: 'sid', domain: '.example.com' },
+  ]), ['cf_clearance', 'sso']);
+  assert.equal(usableGrokUrl('https://grok.com'), true);
+  assert.equal(usableGrokUrl('https://grok.com/chat'), true);
+  assert.equal(usableGrokUrl('https://grok.com/sign-in'), false);
+  assert.equal(usableGrokUrl('https://accounts.x.ai/login'), false);
 });
 
 test('desktop login can target another host through the same app', () => {

@@ -5,8 +5,8 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { chromium } = require('playwright');
 const { conversationUrlOf } = require('./urls');
-const { hasLoginCookie } = require('./session-cookie');
-const { readLoginCookies, loginPageSettled } = require('./cdp-cookies');
+const { hasLoginCookie, grokCookieNames } = require('./session-cookie');
+const { readLoginCookies } = require('./cdp-cookies');
 
 // grok.com 会改版。输入框、发送、停止、回复都做了多套选择器。
 // 改版后优先改这里，不要改外面的协议。
@@ -134,6 +134,7 @@ class Pool {
     this.closing = false;
     this.crashes = [];
     this.forceNoSandbox = false;
+    this.cookieNoteAt = 0;
   }
 
   setState(next) {
@@ -277,21 +278,32 @@ class Pool {
   async tick() {
     if (!this.chromeProc) return;
     if (!this.context) {
-      let likely = false;
-      try { likely = await loginPageSettled(this.debugPort); }
-      catch { return; }
-      if (!likely) return;
       let cookies = [];
       try { cookies = await readLoginCookies(this.debugPort); }
       catch (err) {
         console.error('cookie probe:', err.message);
         return;
       }
-      if (!hasLoginCookie(cookies)) return;
+      if (!hasLoginCookie(cookies)) {
+        this.noteCookies(cookies);
+        return;
+      }
       console.log('login cookie seen, attaching');
       await this.attach();
+      if (!this.loggedIn) {
+        this.loggedIn = true;
+        this.onLogin(true);
+      }
     }
     await this.refreshLogin();
+  }
+
+  noteCookies(cookies) {
+    const now = Date.now();
+    if (now - this.cookieNoteAt < 60_000) return;
+    this.cookieNoteAt = now;
+    const names = grokCookieNames(cookies);
+    console.log(names.length ? `grok cookies: ${names.join(',')}` : 'grok cookies: none');
   }
 
   async attach() {
@@ -453,8 +465,10 @@ class Pool {
 async function pageLoggedIn(page) {
   try {
     if (!page || page.isClosed()) return false;
+    const cookies = await page.context().cookies().catch(() => []);
+    if (hasLoginCookie(cookies)) return true;
     const url = page.url();
-    if (/accounts\.x\.com|x\.com\/i\/flow\/login/.test(url)) return false;
+    if (/accounts\.x\.com|accounts\.x\.ai|x\.com\/i\/flow\/login|\/sign-in|\/login/.test(url)) return false;
     return await page.evaluate(() => {
       const visible = (el) => {
         if (!(el instanceof HTMLElement)) return false;
@@ -463,16 +477,19 @@ async function pageLoggedIn(page) {
         const rect = el.getBoundingClientRect();
         return rect.width > 8 && rect.height > 8;
       };
-      for (const sel of ['a[href*="x.com/i/flow/login"]', 'a[href*="accounts.x.com"]', 'a[href*="/sign-in"]']) {
+      for (const sel of ['a[href*="x.com/i/flow/login"]', 'a[href*="accounts.x.com"]', 'a[href*="accounts.x.ai"]', 'a[href*="/sign-in"]']) {
         if (visible(document.querySelector(sel))) return false;
       }
       for (const el of document.querySelectorAll('a, button')) {
         const label = (el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().toLowerCase();
         if (/^(sign in|log in|登录|登入)$/.test(label) && visible(el)) return false;
       }
-      const composer = document.querySelector(
-        'textarea, .tiptap.ProseMirror[contenteditable="true"], div[contenteditable="true"][role="textbox"]',
-      );
+      const composer = document.querySelector([
+        'textarea',
+        '[contenteditable="true"]',
+        '[role="textbox"]',
+        '.tiptap.ProseMirror',
+      ].join(', '));
       return visible(composer);
     });
   } catch {
