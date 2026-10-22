@@ -7,7 +7,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOST=0.0.0.0 \
     PROFILE_DIR=/data/profile \
     STATE_DIR=/data/state \
-    TZ=Asia/Shanghai
+    TZ=Asia/Shanghai \
+    CHROME_PATH=/usr/bin/google-chrome-stable \
+    CHROME_UID=1000 \
+    CHROME_GID=1000 \
+    CHROME_HOME=/home/chrome
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -17,7 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       websockify \
       fonts-noto-cjk \
       fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
+      wget \
+    && wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get install -y /tmp/chrome.deb \
+    && rm -rf /tmp/chrome.deb /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/false --uid 1000 chrome
 
 WORKDIR /app
 

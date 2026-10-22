@@ -11,7 +11,7 @@
 分席（8080）  每个连接只订阅自己的标签
     │
     ▼
-容器里的 Chromium（登录一次，记在 volume 里）
+容器里的 Google Chrome（登录一次，记在 volume 里）
     ├── 标签甲
     ├── 标签乙
     └── 登录用的那一页（/desktop，地址可改）
@@ -142,6 +142,15 @@ docker compose logs -f fenxi
 
 **VNC 密码怎么对都不对。**  
 只认前 8 位。远程打开时用的是 `/desktop` 里填的那台服务器，不是你自己电脑的 localhost。
+
+**顶上写着 Chrome for Testing，页面是 Something went wrong。**  
+那是自动化测试版浏览器，Grok 会直接拒绝。现在镜像里装的是正式版 Google Chrome，并以普通用户启动，不再带那行 `--no-sandbox` 提示。重建时要能下载 Google 的安装包：
+
+```bash
+docker compose up -d --build
+```
+
+打开桌面后刷新页面。若日志里是「正式版沙箱没起来，改用 --no-sandbox」，页面能开，只是顶上可能还留着那一行提示，关掉即可。
 
 **登录页显示「验证失败，请刷新页面并重试」。**  
 这是 Cloudflare 的验证。以前容器一启动就把浏览器接成自动化，验证会直接失败。现在要等你在桌面里登录成功，外面才会接管。更新后在桌面里刷新登录页再试一次。若刷新后仍失败，看容器日志里有没有「到不了 Cloudflare 验证服务器」——那就是这台机器访问不了 `challenges.cloudflare.com`。

@@ -65,6 +65,40 @@ function grokHome() {
   return process.env.GROK_URL || 'https://grok.com/';
 }
 
+function chromeBin() {
+  const fromEnv = process.env.CHROME_PATH;
+  if (fromEnv && fs.existsSync(fromEnv)) return { bin: fromEnv, real: true };
+  for (const bin of ['/usr/bin/google-chrome-stable', '/usr/bin/google-chrome']) {
+    if (fs.existsSync(bin)) return { bin, real: true };
+  }
+  console.error('没有正式版 Chrome，退回 Chrome for Testing。Grok 会拒绝这个浏览器。');
+  return { bin: chromium.executablePath(), real: false };
+}
+
+function markCleanExit(profileDir) {
+  const prefPath = path.join(profileDir, 'Default', 'Preferences');
+  try {
+    const prefs = JSON.parse(fs.readFileSync(prefPath, 'utf8'));
+    prefs.profile = prefs.profile || {};
+    prefs.profile.exit_type = 'Normal';
+    prefs.profile.exited_cleanly = true;
+    fs.writeFileSync(prefPath, JSON.stringify(prefs));
+  } catch {
+    // first launch has no preferences yet
+  }
+}
+
+function chownTree(dir, uid, gid) {
+  fs.chownSync(dir, uid, gid);
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    const stat = fs.lstatSync(full);
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isDirectory()) chownTree(full, uid, gid);
+    else fs.chownSync(full, uid, gid);
+  }
+}
+
 class Tab {
   constructor(page) {
     this.page = page;
@@ -99,6 +133,7 @@ class Pool {
     this.debugPort = Number(process.env.CHROME_PORT || 9222);
     this.closing = false;
     this.crashes = [];
+    this.forceNoSandbox = false;
   }
 
   setState(next) {
@@ -136,17 +171,35 @@ class Pool {
   }
 
   async spawnChrome(headless) {
-    const bin = chromium.executablePath();
+    try {
+      await this.spawnOnce(headless, !this.forceNoSandbox);
+    } catch (err) {
+      if (this.forceNoSandbox) throw err;
+      console.error('正式版沙箱没起来，改用 --no-sandbox:', err.message);
+      this.forceNoSandbox = true;
+      this.stopChrome();
+      await sleep(400);
+      await this.spawnOnce(headless, false);
+    }
+  }
+
+  async spawnOnce(headless, useSandbox) {
+    const chosen = chromeBin();
+    const uid = Number(process.env.CHROME_UID || 0);
+    const gid = Number(process.env.CHROME_GID || uid);
+    const asUser = chosen.real && uid > 0 && typeof process.getuid === 'function' && process.getuid() === 0;
+    markCleanExit(this.profileDir);
+    if (asUser) chownTree(this.profileDir, uid, gid);
     const args = [
       `--user-data-dir=${this.profileDir}`,
       `--remote-debugging-port=${this.debugPort}`,
       '--remote-debugging-address=127.0.0.1',
       '--remote-allow-origins=*',
-      '--no-sandbox',
       '--disable-dev-shm-usage',
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-search-engine-choice-screen',
+      '--hide-crash-restore-bubble',
       '--password-store=basic',
       '--window-size=1440,900',
       '--window-position=0,0',
@@ -157,16 +210,27 @@ class Pool {
       '--use-gl=angle',
       '--use-angle=swiftshader',
     ];
+    if (!chosen.real || !useSandbox) args.push('--no-sandbox');
     if (headless) {
       args.push('--headless=new');
       console.error('headless: Cloudflare 验证多半会失败。登录请用桌面里的窗口。');
     }
     args.push(grokHome());
-    const proc = spawn(bin, args, {
+    const opts = {
       detached: true,
-      env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
+      env: {
+        ...process.env,
+        DISPLAY: process.env.DISPLAY || ':99',
+        HOME: asUser ? (process.env.CHROME_HOME || '/home/chrome') : (process.env.HOME || '/root'),
+      },
       stdio: ['ignore', 'ignore', 'pipe'],
-    });
+    };
+    if (asUser) {
+      opts.uid = uid;
+      opts.gid = gid;
+    }
+    console.log(`chrome: ${chosen.real ? 'google-chrome' : 'for-testing'} sandbox=${chosen.real && useSandbox}`);
+    const proc = spawn(chosen.bin, args, opts);
     this.chromeProc = proc;
     proc.stderr.on('data', (buf) => {
       const line = buf.toString().replace(/\s+/g, ' ').trim();

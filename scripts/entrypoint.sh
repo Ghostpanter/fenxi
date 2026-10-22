@@ -4,6 +4,9 @@ export DISPLAY="${DISPLAY:-:99}"
 mkdir -p /tmp/.X11-unix /data/profile /data/state
 chmod 1777 /tmp/.X11-unix || true
 rm -f /tmp/.X99-lock
+if id chrome >/dev/null 2>&1; then
+  chown -R chrome:chrome /data/profile || true
+fi
 
 Xvfb "$DISPLAY" -screen 0 1440x900x24 -ac +extension RANDR >/tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
