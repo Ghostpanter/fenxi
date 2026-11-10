@@ -27,10 +27,13 @@ test('markdown fences stay escaped and bold is tags', () => {
   assert.match(html, /<pre><code>const x = \u0026quot;\u0026lt;b\u0026gt;\u0026quot;;<\/code><\/pre>/);
 });
 
-test('only https images are kept', () => {
+test('only https images and safe data images are kept', () => {
   assert.equal(safeImageUrl('javascript:alert(1)'), null);
   assert.equal(safeImageUrl('http://example.com/a.png'), null);
   assert.equal(safeImageUrl('https://example.com/a.png'), 'https://example.com/a.png');
+  assert.equal(safeImageUrl('data:text/html;base64,PHNjcmlwdD4='), null);
+  const png = 'data:image/png;base64,aGVsbG8=';
+  assert.equal(safeImageUrl(png), png);
 });
 
 test('access code compare does not treat different lengths as equal', () => {
@@ -84,14 +87,28 @@ test('a message for one seat never reaches another', () => {
   const hub = new Hub();
   const a = { readyState: 1, sends: [], send(data) { this.sends.push(data); } };
   const b = { readyState: 1, sends: [], send(data) { this.sends.push(data); } };
-  hub.join('seat-a', a);
-  hub.join('seat-b', b);
-  hub.emit('seat-a', { type: 'message', text: '只有甲能看' });
+  hub.join('default', 'seat-a', a);
+  hub.join('default', 'seat-b', b);
+  hub.emit('default', 'seat-a', { type: 'message', text: '只有甲能看' });
   assert.equal(b.sends.length, 0);
   assert.match(a.sends[0], /只有甲能看/);
   hub.leave(a);
-  hub.emit('seat-a', { type: 'message', text: '走了' });
+  hub.emit('default', 'seat-a', { type: 'message', text: '走了' });
   assert.equal(a.sends.length, 1);
+});
+
+test('the same seat id in two tenants does not share traffic', () => {
+  const hub = new Hub();
+  const a = { readyState: 1, sends: [], send(data) { this.sends.push(data); } };
+  const b = { readyState: 1, sends: [], send(data) { this.sends.push(data); } };
+  hub.join('alpha', 'seat-1', a);
+  hub.join('beta', 'seat-1', b);
+  hub.emit('alpha', 'seat-1', { type: 'message', text: '只给甲租户', images: ['https://alpha.example/a.png'] });
+  assert.equal(b.sends.length, 0);
+  assert.match(a.sends[0], /只给甲租户/);
+  hub.closeTenant('alpha');
+  hub.emit('beta', 'seat-1', { type: 'message', text: '乙还在' });
+  assert.match(b.sends[0], /乙还在/);
 });
 
 test('sessions round-trip without staying stuck in pending', () => {

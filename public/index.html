@@ -19,6 +19,7 @@
       <p class="lede">一份网页，每人自己的一页。你写下的话只送进你的标签，别人看不到。</p>
       <label for="name">你的称呼</label>
       <input id="name" name="username" autocomplete="username" maxlength="24" required placeholder="怎么称呼你" />
+      <!--TENANT-->
       <label for="code">入场口令</label>
       <input id="code" name="password" type="password" autocomplete="current-password" required />
       <p class="form-error" id="gateError" role="alert"></p>
@@ -51,6 +52,10 @@
     <form class="composer" id="composer">
       <label class="sr" for="box">写给这一页</label>
       <textarea id="box" rows="1" maxlength="8000" placeholder="写在这里，只会进你自己的那一页"></textarea>
+      <label class="attach" title="加上图片">
+        <input id="pics" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple />
+        <span>图片</span>
+      </label>
       <button type="submit" id="send">发送</button>
     </form>
   </main>

@@ -5,6 +5,8 @@
   const gateHealth = document.getElementById('gateHealth');
   const nameInput = document.getElementById('name');
   const codeInput = document.getElementById('code');
+  const tenantInput = document.getElementById('tenantId');
+  const picsInput = document.getElementById('pics');
   const enterBtn = document.getElementById('enter');
   const sheet = document.getElementById('sheet');
   const who = document.getElementById('who');
@@ -26,6 +28,8 @@
   let loggedIn = false;
   let sending = false;
   let name = '';
+  let tenant = '';
+  let pendingImages = [];
 
   function token() {
     return localStorage.getItem(TOKEN_KEY) || '';
@@ -118,6 +122,7 @@
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type === 'hello') {
         name = msg.name || name;
+        tenant = msg.tenant || tenant;
         who.textContent = name ? `你的页面 · ${name}` : '你的页面';
         messages = msg.messages || [];
         sending = messages.some((item) => item.pending);
@@ -182,6 +187,7 @@
     }
     const data = await res.json();
     name = data.name || '';
+    tenant = data.tenant || tenant;
     applyLogin(data.loggedIn);
     showChat();
     connect();
@@ -195,7 +201,11 @@
       const res = await fetch('/api/join', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: nameInput.value, code: codeInput.value }),
+        body: JSON.stringify({
+          name: nameInput.value,
+          code: codeInput.value,
+          tenant: (tenantInput && tenantInput.value.trim()) || undefined,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -204,6 +214,7 @@
       }
       localStorage.setItem(TOKEN_KEY, data.token);
       name = data.name || nameInput.value.trim();
+      tenant = data.tenant || tenant || '';
       left = false;
       messages = [];
       showChat();
@@ -225,14 +236,16 @@
       return;
     }
     const text = box.value.trim();
-    if (!text) return;
+    if (!text && !pendingImages.length) return;
     if (!loggedIn) {
       setNotice('网页还没登录。等主人在容器桌面里登录之后，这一页就能写。');
       return;
     }
-    ws.send(JSON.stringify({ type: 'send', text }));
+    ws.send(JSON.stringify({ type: 'send', text, images: pendingImages.slice() }));
     box.value = '';
     box.style.height = 'auto';
+    pendingImages = [];
+    if (picsInput) picsInput.value = '';
     sending = true;
     sendBtn.textContent = '停止';
   }
@@ -288,15 +301,46 @@
     try {
       const res = await fetch('/api/health');
       const data = await res.json();
-      const login = data.loggedIn ? '容器里的网页已登录' : '容器里的网页还没登录';
-      const seats = typeof data.seats === 'number' ? ` · ${data.seats}/${data.maxSeats} 席` : '';
-      gateHealth.textContent = login + seats;
+      if (data.multiTenant) {
+        gateHealth.textContent = `这一台同时服务 ${data.tenants} 个租户。每个租户用自己的口令和席位。`;
+      } else {
+        const login = data.loggedIn ? '容器里的网页已登录' : '容器里的网页还没登录';
+        const seats = typeof data.seats === 'number' ? ` · ${data.seats}/${data.maxSeats} 席` : '';
+        gateHealth.textContent = login + seats;
+      }
       if (document.body.classList.contains('in-chat') && (!ws || ws.readyState === WebSocket.OPEN)) {
-        applyLogin(data.loggedIn);
+        if (!data.multiTenant) applyLogin(data.loggedIn);
       }
     } catch {
       gateHealth.textContent = '还没连上分席。';
     }
+  }
+
+  function readFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (picsInput) {
+    picsInput.addEventListener('change', async () => {
+      const files = [...(picsInput.files || [])].slice(0, 8);
+      const next = [];
+      for (const file of files) {
+        if (!/^image\/(png|jpeg|jpg|gif|webp)$/i.test(file.type)) continue;
+        if (file.size > 4 * 1024 * 1024) {
+          setNotice('单张图片请小于 4 MB。');
+          continue;
+        }
+        const data = await readFile(file);
+        if (typeof data === 'string' && data.startsWith('data:image/')) next.push(data);
+      }
+      pendingImages = next;
+      if (next.length) setNotice(`已选 ${next.length} 张图片，发送时会一起进你自己的那一页。`);
+    });
   }
 
   pollHealth();

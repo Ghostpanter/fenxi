@@ -5,8 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
     PORT=8080 \
     HOST=0.0.0.0 \
-    PROFILE_DIR=/data/profile \
-    STATE_DIR=/data/state \
+    DATA_DIR=/data \
     TZ=Asia/Shanghai \
     CHROME_PATH=/usr/bin/google-chrome-stable
 
@@ -37,7 +36,7 @@ RUN npm ci --omit=dev \
 
 COPY . .
 RUN chmod +x /app/scripts/entrypoint.sh \
-    && mkdir -p /data/profile /data/state
+    && mkdir -p /data
 
 EXPOSE 8080 6080
 ENTRYPOINT ["bash", "/app/scripts/entrypoint.sh"]
