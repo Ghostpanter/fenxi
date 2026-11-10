@@ -313,6 +313,30 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
   padding: 0 16px;
 }
 
+.attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  min-width: 52px;
+  padding: 0 10px;
+  border: 1px solid var(--mist);
+  border-radius: 14px;
+  color: var(--slate);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #fff;
+}
+
+.attach input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
 body.in-chat .gate { display: none; }
 
 body:not(.in-chat) .sheet { display: none; }

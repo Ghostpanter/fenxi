@@ -1,31 +1,39 @@
 'use strict';
 
+function roomKey(tenantId, seatId) {
+  return `${String(tenantId)}\u0000${String(seatId)}`;
+}
+
 class Hub {
   constructor() {
     this.rooms = new Map();
   }
 
-  join(sessionId, socket) {
-    let set = this.rooms.get(sessionId);
+  join(tenantId, seatId, socket) {
+    const key = roomKey(tenantId, seatId);
+    let set = this.rooms.get(key);
     if (!set) {
       set = new Set();
-      this.rooms.set(sessionId, set);
+      this.rooms.set(key, set);
     }
     set.add(socket);
-    socket.__fenxiSession = sessionId;
+    socket.__fenxiTenant = String(tenantId);
+    socket.__fenxiSession = String(seatId);
   }
 
   leave(socket) {
-    const sessionId = socket.__fenxiSession;
-    if (!sessionId) return;
-    const set = this.rooms.get(sessionId);
+    const tenantId = socket.__fenxiTenant;
+    const seatId = socket.__fenxiSession;
+    if (!tenantId || !seatId) return;
+    const key = roomKey(tenantId, seatId);
+    const set = this.rooms.get(key);
     if (!set) return;
     set.delete(socket);
-    if (set.size === 0) this.rooms.delete(sessionId);
+    if (set.size === 0) this.rooms.delete(key);
   }
 
-  emit(sessionId, payload) {
-    const set = this.rooms.get(sessionId);
+  emit(tenantId, seatId, payload) {
+    const set = this.rooms.get(roomKey(tenantId, seatId));
     if (!set) return;
     const data = JSON.stringify(payload);
     for (const socket of set) {
@@ -33,14 +41,26 @@ class Hub {
     }
   }
 
-  close(sessionId) {
-    const set = this.rooms.get(sessionId);
+  close(tenantId, seatId) {
+    const key = roomKey(tenantId, seatId);
+    const set = this.rooms.get(key);
     if (!set) return;
     for (const socket of set) {
       try { socket.close(1000, 'leave'); } catch { /* already gone */ }
     }
-    this.rooms.delete(sessionId);
+    this.rooms.delete(key);
+  }
+
+  closeTenant(tenantId) {
+    const prefix = `${String(tenantId)}\u0000`;
+    for (const [key, set] of this.rooms) {
+      if (!key.startsWith(prefix)) continue;
+      for (const socket of set) {
+        try { socket.close(1000, 'leave'); } catch { /* already gone */ }
+      }
+      this.rooms.delete(key);
+    }
   }
 }
 
-module.exports = { Hub };
+module.exports = { Hub, roomKey };

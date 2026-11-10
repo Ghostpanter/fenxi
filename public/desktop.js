@@ -2,6 +2,7 @@
   const hostInput = document.getElementById('host');
   const portInput = document.getElementById('port');
   const whereInput = document.getElementById('where');
+  const tenantInput = document.getElementById('tenantId');
   const error = document.getElementById('deskError');
   const params = new URLSearchParams(location.search);
   const pagePort = location.port || (location.protocol === 'https:' ? '443' : '80');
@@ -14,6 +15,10 @@
     if (whereInput.value === 'direct') portInput.value = '6080';
     else portInput.value = pagePort;
   });
+
+  function tenantId() {
+    return (tenantInput && tenantInput.value.trim()) || '';
+  }
 
   function cleanHost(value) {
     const host = value.trim();
@@ -38,6 +43,15 @@
     error.textContent = '';
     const host = cleanHost(hostInput.value);
     const port = cleanPort(portInput.value);
+    const tenant = tenantId();
+    if (!tenant) {
+      error.textContent = '请填写租户编号。';
+      return;
+    }
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(tenant)) {
+      error.textContent = '租户编号不对。';
+      return;
+    }
     if (!host || !port) {
       error.textContent = '地址或端口不对。';
       return;
@@ -49,10 +63,14 @@
       const q = new URLSearchParams({
         autoconnect: '1',
         resize: 'scale',
-        path: 'websockify',
+        path: `websockify/${tenant}`,
         encrypt: secure,
       });
-      location.assign(`/novnc/vnc.html?${q}`);
+      location.assign(`/novnc/${encodeURIComponent(tenant)}/vnc.html?${q}`);
+      return;
+    }
+    if (whereInput.value === 'direct' && tenant !== 'default') {
+      error.textContent = '6080 只接 default 租户的桌面。其他租户请选「跟分席同一个地址」。';
       return;
     }
     const q = new URLSearchParams({ autoconnect: '1', resize: 'scale' });

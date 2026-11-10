@@ -120,6 +120,7 @@ class Pool {
     this.profileDir = opts.profileDir;
     this.onLogin = opts.onLogin || (() => {});
     this.onState = opts.onState || (() => {});
+    this.display = opts.display || process.env.DISPLAY || ':99';
     this.context = null;
     this.watch = null;
     this.loggedIn = false;
@@ -130,7 +131,7 @@ class Pool {
     this.launching = false;
     this.chromeProc = null;
     this.browser = null;
-    this.debugPort = Number(process.env.CHROME_PORT || 9222);
+    this.debugPort = Number(opts.debugPort || process.env.CHROME_PORT || 9222);
     this.closing = false;
     this.crashes = [];
     this.forceNoSandbox = false;
@@ -221,7 +222,7 @@ class Pool {
       detached: true,
       env: {
         ...process.env,
-        DISPLAY: process.env.DISPLAY || ':99',
+        DISPLAY: this.display || process.env.DISPLAY || ':99',
         HOME: asUser ? (process.env.CHROME_HOME || '/home/chrome') : (process.env.HOME || '/root'),
       },
       stdio: ['ignore', 'ignore', 'pipe'],
@@ -371,11 +372,11 @@ class Pool {
     if (tab) tab.abort = true;
   }
 
-  send(tab, text, onDelta) {
-    return tab.enqueue(() => this._send(tab, text, onDelta));
+  send(tab, text, onDelta, images) {
+    return tab.enqueue(() => this._send(tab, text, onDelta, images));
   }
 
-  async _send(tab, text, onDelta) {
+  async _send(tab, text, onDelta, images) {
     const page = tab.page;
     if (!page || page.isClosed()) throw new Error('这一页已经关了，刷新后再试');
     tab.busy = true;
@@ -389,7 +390,8 @@ class Pool {
       }
       const before = await readState(page);
       await dismissBanners(page);
-      await focusAndType(page, text);
+      await attachImages(page, images);
+      if (text) await focusAndType(page, text);
       await clickSend(page);
       const started = Date.now();
       let last = '';
@@ -576,6 +578,42 @@ async function focusAndType(page, text) {
     await page.keyboard.press('Backspace');
     await page.keyboard.insertText(text);
   }
+}
+
+
+async function attachImages(page, images) {
+  const list = Array.isArray(images) ? images : [];
+  const files = [];
+  for (let i = 0; i < list.length && files.length < 8; i += 1) {
+    const src = String(list[i] || '');
+    const match = src.match(/^data:(image\/(png|jpeg|jpg|gif|webp));base64,([A-Za-z0-9+/=\s]+)$/i);
+    if (!match) continue;
+    const mime = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+    const ext = mime.split('/')[1] === 'jpeg' ? 'jpg' : mime.split('/')[1];
+    files.push({
+      name: `fenxi-${i}.${ext}`,
+      mimeType: mime,
+      buffer: Buffer.from(match[3].replace(/\s+/g, ''), 'base64'),
+    });
+  }
+  if (!files.length) return;
+  const input = page.locator('input[type="file"]').first();
+  if (await input.count()) {
+    await input.setInputFiles(files);
+    return;
+  }
+  await page.evaluate(async (items) => {
+    const transfer = new DataTransfer();
+    for (const item of items) {
+      const binary = atob(item.b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      transfer.items.add(new File([bytes], item.name, { type: item.mimeType }));
+    }
+    const box = document.querySelector('textarea, .tiptap.ProseMirror[contenteditable="true"], div[contenteditable="true"][role="textbox"]');
+    const target = (box && box.closest('form')) || document.body;
+    target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+  }, files.map((file) => ({ name: file.name, mimeType: file.mimeType, b64: file.buffer.toString('base64') })));
 }
 
 async function clickSend(page) {

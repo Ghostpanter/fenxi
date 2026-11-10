@@ -16,6 +16,10 @@
   }
 
   function safeImageUrl(url) {
+    if (typeof url !== 'string' || !url) return null;
+    if (url.startsWith('data:image/')) {
+      return /^data:image\/(png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(url) ? url : null;
+    }
     try {
       const u = new URL(url);
       if (u.protocol !== 'https:') return null;
